@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="id"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SquadChat</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#EDF0F7;--card:#fff;--ink:#1A2036;--mut:#6A7390;--acc:#2F4BFF;--on:#fff;--line:#DCE1EE;--bad:#D23B4B}
+@media(prefers-color-scheme:dark){:root{--bg:#0F1424;--card:#181F36;--ink:#E8ECF8;--mut:#8A93B2;--acc:#6C84FF;--on:#0F1424;--line:#262E4A;--bad:#FF7A86}}
+*{box-sizing:border-box}html,body{height:100%;margin:0}
+body{font:16px/1.45 Outfit,system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer;border:0;border-radius:12px;padding:10px 16px;background:var(--acc);color:var(--on);font-weight:500}
+button.g{background:transparent;color:var(--acc);padding:6px 8px}button.d{background:transparent;color:var(--bad);padding:6px 8px}
+input,textarea{width:100%;border:1px solid var(--line);background:var(--card);border-radius:12px;padding:11px 14px}
+:focus-visible{outline:2px solid var(--acc);outline-offset:2px}
+.hide{display:none!important}
+#login{min-height:100%;display:grid;place-items:center;padding:24px}
+#login form{width:100%;max-width:340px;display:grid;gap:12px}
+#login h1{font-size:34px;margin:0 0 4px;letter-spacing:-.02em}
+.err{color:var(--bad);min-height:1.4em;margin:0}
+#app{height:100%;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+header{padding:14px 18px;font-weight:600;font-size:20px;background:var(--card);border-bottom:1px solid var(--line)}
+main{flex:1;overflow-y:auto;padding:14px 16px}
+nav{display:flex;background:var(--card);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;color:var(--mut);border-radius:0;padding:13px 4px}
+nav button.on{color:var(--acc);box-shadow:inset 0 2px 0 var(--acc)}
+.row{display:flex;gap:8px;align-items:center}
+.msg{max-width:82%;margin:0 0 10px;padding:8px 12px;border-radius:16px 16px 16px 4px;background:var(--card);overflow-wrap:anywhere}
+.msg.me{margin-left:auto;background:var(--acc);color:var(--on);border-radius:16px 16px 4px 16px}
+.msg b{font-size:13px;display:block}.msg small,.mut{color:var(--mut);font-size:13px}.msg.me small{color:inherit;opacity:.75}
+.msg img,.st img{max-width:100%;border-radius:10px;display:block;margin-top:6px}
+.bar{display:flex;gap:8px;padding:10px 12px;background:var(--card);border-top:1px solid var(--line)}
+.bar input[type=text]{flex:1}
+.clip{padding:10px 12px;background:var(--bg);color:var(--ink)}
+.card{background:var(--card);border-radius:14px;padding:12px 14px;margin-bottom:10px}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bg);color:var(--acc);margin-left:6px}
+.grid{display:grid;gap:8px;margin-bottom:12px}
+h2{font-size:17px;margin:16px 0 8px}
+</style></head><body>
+<section id="login" class="hide"><form id="lf">
+<h1>SquadChat</h1><p class="mut" style="margin:0 0 8px">Masuk dengan username dari admin.</p>
+<input id="u" placeholder="Username" autocomplete="username" required>
+<input id="p" type="password" placeholder="Sandi" autocomplete="current-password" required>
+<p class="err" id="le"></p><button>Masuk</button></form></section>
+
+<div id="app" class="hide">
+<header id="ttl"></header><main id="main"></main>
+<div class="bar hide" id="cbar"><label class="clip" style="border-radius:12px;cursor:pointer">📎<input id="cf" type="file" hidden></label>
+<input type="text" id="ci" placeholder="Tulis pesan" autocomplete="off"><button id="cs">Kirim</button></div>
+<nav id="nav"></nav></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.js"></script>
+<script>
+const SUPABASE_URL='GANTI_URL_SUPABASE', SUPABASE_ANON_KEY='GANTI_ANON_KEY';
+const SB=supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
+const $=s=>document.querySelector(s), main=$('#main');
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const cutoff=()=>new Date(Date.now()-864e5).toISOString();
+const hhmm=t=>new Date(t).toLocaleTimeString('id-ID',{hour:'2-digit',minute:'2-digit'});
+const isImg=n=>/\.(png|jpe?g|gif|webp)$/i.test(n||'');
+let me,P={},tab='chat',chans=[];
+
+async function api(action,d={}){
+  const {data:{session}}=await SB.auth.getSession();
+  const r=await fetch('/api/admin',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+session.access_token},body:JSON.stringify({action,...d})});
+  const j=await r.json(); if(!r.ok) throw new Error(j.error||'Gagal'); return j;
+}
+async function loadP(){const {data}=await SB.from('profiles').select('*').order('username');P={};(data||[]).forEach(x=>P[x.id]=x);}
+const nm=id=>esc(P[id]?.display_name||'?');
+const canAdmin=()=>['owner','coadmin'].includes(me.role);
+
+$('#lf').onsubmit=async e=>{e.preventDefault();
+  const {error}=await SB.auth.signInWithPassword({email:$('#u').value.trim().toLowerCase()+'@squad.chat',password:$('#p').value});
+  $('#le').textContent=error?'Username atau sandi salah.':''; if(!error) start();};
+
+async function start(){
+  const {data:{session}}=await SB.auth.getSession();
+  if(!session){$('#login').classList.remove('hide');$('#app').classList.add('hide');return;}
+  await loadP(); me=P[session.user.id];
+  if(!me){await SB.auth.signOut();return start();}
+  $('#login').classList.add('hide');$('#app').classList.remove('hide');
+  api('cleanup').catch(()=>{}); setInterval(()=>api('cleanup').catch(()=>{}),9e5);
+  chans.forEach(c=>SB.removeChannel(c));
+  chans=[SB.channel('m').on('postgres_changes',{event:'INSERT',schema:'public',table:'messages'},async p=>{
+      if(!P[p.new.user_id]) await loadP(); if(tab==='chat') addMsg(p.new,true);}).subscribe(),
+    SB.channel('s').on('postgres_changes',{event:'INSERT',schema:'public',table:'statuses'},()=>{if(tab==='status')show();}).subscribe()];
+  go('chat');
+}
+function go(t){tab=t;
+  const T=[['chat','Chat'],['status','Status'],['people','Anggota'],['me','Profil']];
+  $('#nav').innerHTML=T.map(([k,l])=>`<button class="${k===t?'on':''}" onclick="go('${k}')">${l}</button>`).join('');
+  $('#ttl').textContent=T.find(x=>x[0]===t)[1]; $('#cbar').classList.toggle('hide',t!=='chat'); show();}
+function show(){({chat,status,people,me:profil})[tab]();}
+
+async function fileUrl(path){const {data}=await SB.storage.from('files').createSignedUrl(path,3600);return data?.signedUrl;}
+async function upload(f){
+  if(f.size>10485760) throw new Error('File maksimal 10 MB');
+  const path=`${me.id}/${Date.now()}_${f.name.replace(/[^\w.\-]/g,'_')}`;
+  const {error}=await SB.storage.from('files').upload(path,f); if(error) throw error; return path;}
+async function fileHtml(path,name){const u=await fileUrl(path); if(!u) return '';
+  return isImg(name)?`<a href="${u}" target="_blank"><img src="${u}" alt="${esc(name)}"></a>`:`<a href="${u}" target="_blank" style="color:inherit">📄 ${esc(name)}</a>`;}
+
+async function chat(){
+  main.innerHTML='<div id="ml"></div>';
+  const {data}=await SB.from('messages').select('*').gt('created_at',cutoff()).order('created_at');
+  if(!data?.length) $('#ml').innerHTML='<p class="mut">Belum ada pesan. Pesan hilang otomatis setelah 24 jam.</p>';
+  for(const m of data||[]) await addMsg(m);
+  main.scrollTop=main.scrollHeight;}
+async function addMsg(m,live){
+  const el=document.createElement('div'); el.className='msg'+(m.user_id===me.id?' me':'');
+  el.innerHTML=`<b>${nm(m.user_id)}</b>${esc(m.body)}<span class="f"></span> <small>${hhmm(m.created_at)}</small>`;
+  const ml=$('#ml'); if(!ml) return; if(live) ml.querySelector('p.mut')?.remove(); ml.appendChild(el);
+  if(m.file_path) el.querySelector('.f').innerHTML=await fileHtml(m.file_path,m.file_name);
+  if(live) main.scrollTop=main.scrollHeight;}
+$('#cs').onclick=async()=>{
+  const body=$('#ci').value.trim(), f=$('#cf').files[0]; if(!body&&!f) return;
+  $('#cs').disabled=true;
+  try{const row={body:body||null}; if(f){row.file_path=await upload(f);row.file_name=f.name;}
+    const {error}=await SB.from('messages').insert(row); if(error) throw error; $('#ci').value='';$('#cf').value='';}
+  catch(e){alert(e.message);} $('#cs').disabled=false;};
+$('#ci').onkeydown=e=>{if(e.key==='Enter')$('#cs').click();};
+
+async function status(){
+  main.innerHTML=`<div class="card grid"><input id="st" placeholder="Apa kabarmu hari ini?"><input id="sf" type="file" accept="image/*"><button id="sp">Posting status</button></div><div id="sl"></div>`;
+  $('#sp').onclick=async()=>{const body=$('#st').value.trim(),f=$('#sf').files[0]; if(!body&&!f) return;
+    try{const row={body:body||null}; if(f) row.file_path=await upload(f);
+      const {error}=await SB.from('statuses').insert(row); if(error) throw error;}catch(e){alert(e.message);}};
+  const {data}=await SB.from('statuses').select('*').gt('created_at',cutoff()).order('created_at',{ascending:false});
+  $('#sl').innerHTML=data?.length?'':'<p class="mut">Belum ada status. Status hilang setelah 24 jam.</p>';
+  for(const s of data||[]){const d=document.createElement('div');d.className='card st';
+    d.innerHTML=`<b>${nm(s.user_id)}</b> <small class="mut">${hhmm(s.created_at)}</small><div>${esc(s.body)}</div><span></span>`;
+    $('#sl').appendChild(d); if(s.file_path) d.querySelector('span').innerHTML=await fileHtml(s.file_path,'x.jpg');}}
+
+async function people(){
+  await loadP(); let h='';
+  if(canAdmin()) h+=`<div class="card grid"><b>Tambah akun</b><input id="nu" placeholder="Username (huruf kecil/angka)"><input id="nn" placeholder="Nama tampilan"><input id="np" placeholder="Sandi awal (min. 8 karakter)"><p class="err" id="ae"></p><button id="na">Tambah akun</button></div>`;
+  h+=Object.values(P).map(u=>{const mine=u.id===me.id,locked=u.role==='owner'||mine||(u.role==='coadmin'&&me.role!=='owner');
+    return `<div class="card"><b>${esc(u.display_name)}</b><span class="tag">${esc(u.rank)}</span><div class="mut">@${esc(u.username)} · ${esc(u.bio)}</div>
+    ${canAdmin()&&!locked?`<div class="row"><button class="g" onclick="rp('${u.id}')">Reset sandi</button><button class="d" onclick="dl('${u.id}')">Hapus</button>
+    ${me.role==='owner'?`<button class="g" onclick="sr('${u.id}','${u.role}')">Atur peringkat</button>`:''}</div>`:''}</div>`}).join('');
+  main.innerHTML=h;
+  if($('#na')) $('#na').onclick=async()=>{try{await api('create_user',{username:$('#nu').value,display_name:$('#nn').value,password:$('#np').value});people();}catch(e){$('#ae').textContent=e.message;}};}
+const act=async(a,d)=>{try{await api(a,d);people();}catch(e){alert(e.message);}};
+const dl=id=>confirm('Hapus akun ini? Tidak bisa dibatalkan.')&&act('delete_user',{id});
+const rp=id=>{const p=prompt('Sandi baru (min. 8 karakter):'); if(p) act('reset_password',{id,password:p});};
+const sr=(id,role)=>{const r=prompt('Peringkat (mis. Co-admin, Mod, Anggota):'); if(!r) return;
+  const co=confirm('Jadikan co-admin (bisa tambah & hapus akun)?\nOK = ya, Batal = anggota biasa'); act('set_role',{id,rank:r,role:co?'coadmin':'member'});};
+
+function profil(){
+  main.innerHTML=`<div class="card grid"><b>Profil</b><input id="dn" value="${esc(me.display_name)}" placeholder="Nama tampilan"><input id="bi" value="${esc(me.bio)}" placeholder="Deskripsi singkat"><button id="sv">Simpan profil</button></div>
+  <div class="card grid"><b>Ganti sandi</b><input id="pw" type="password" placeholder="Sandi baru (min. 8 karakter)" autocomplete="new-password"><p class="err" id="pe"></p><button id="cp">Ganti sandi</button></div>
+  <button class="d" id="lo">Keluar</button>`;
+  $('#sv').onclick=async()=>{const {error}=await SB.from('profiles').update({display_name:$('#dn').value.trim()||me.username,bio:$('#bi').value.trim()}).eq('id',me.id);
+    if(error) return alert(error.message); await loadP(); me=P[me.id]; alert('Profil tersimpan');};
+  $('#cp').onclick=async()=>{const pw=$('#pw').value; if(pw.length<8) return $('#pe').textContent='Sandi minimal 8 karakter.';
+    const {error}=await SB.auth.updateUser({password:pw}); $('#pe').textContent=error?error.message:'Sandi diganti.'; if(!error)$('#pw').value='';};
+  $('#lo').onclick=async()=>{await SB.auth.signOut();location.reload();};}
+
+start();
+</script></body></html>
